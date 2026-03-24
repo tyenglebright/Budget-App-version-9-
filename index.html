@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Envelope Budget App</title>
+
+<style>
+body { font-family: Arial; margin:0; background:#f7f7f7; }
+header { text-align:center; padding:1rem; background:#4CAF50; color:white; }
+.container { padding:15px; }
+input, button { width:100%; padding:12px; margin:6px 0; font-size:1rem; }
+.envelope { background:white; padding:15px; border-radius:10px; margin:8px 0; cursor:pointer; box-shadow:0 3px 6px rgba(0,0,0,0.1);}
+.negative { color:red; }
+#app { display:none; }
+
+/* MODAL */
+#modal {
+display:none;
+position:fixed;
+top:0; left:0; right:0; bottom:0;
+background:rgba(0,0,0,0.5);
+justify-content:center;
+align-items:center;
+z-index:1000;
+}
+#modalContent { background:white; padding:20px; border-radius:10px; width:90%; max-width:400px; }
+#history { max-height:200px; overflow-y:auto; margin-top:10px; border-top:1px solid #ddd; padding-top:10px; }
+</style>
+</head>
+
+<body>
+<header>Envelope Budget App</header>
+
+<!-- LOGIN -->
+<div class="container" id="auth">
+<h3>Login / Sign Up</h3>
+<input id="emailInput" placeholder="Email">
+<input id="passwordInput" type="password" placeholder="Password">
+<button id="signupBtn">Sign Up</button>
+<button id="loginBtn">Login</button>
+<p id="authError" style="color:red;"></p>
+</div>
+
+<!-- APP -->
+<div class="container" id="app">
+<button id="logoutBtn">Logout</button>
+<h3 id="total">$0.00 Total</h3>
+<div id="envelopes"></div>
+<button id="addEnvelopeBtn">+ Add Envelope</button>
+</div>
+
+<!-- MODAL -->
+<div id="modal">
+<div id="modalContent">
+<h4>Balance: $<span id="modalBalance">0</span></h4>
+<input id="amountInput" placeholder="Amount" type="number">
+<input id="noteInput" placeholder="Optional Note">
+<button id="addMoneyBtn">Add Money</button>
+<button id="spendMoneyBtn">Spend Money</button>
+<div id="history"></div>
+<button id="closeModalBtn">Close</button>
+</div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, collection, addDoc, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+// ✅ YOUR REAL CONFIG (already fixed)
+const firebaseConfig = {
+apiKey: "AIzaSyCkQ6YSSkvgPVEzHQz-UPeyJRiFqDX18Ug",
+authDomain: "budget-app-51260.firebaseapp.com",
+projectId: "budget-app-51260",
+storageBucket: "budget-app-51260.firebasestorage.app",
+messagingSenderId: "378506546234",
+appId: "1:378506546234:web:aa8c4be92bc5c736a8f903"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let userId = null;
+let currentEnvelopeId = null;
+let envelopeSpans = {};
+
+document.addEventListener("DOMContentLoaded", () => {
+
+const authDiv = document.getElementById("auth");
+const appDiv = document.getElementById("app");
+
+const emailInput = document.getElementById("emailInput");
+const passwordInput = document.getElementById("passwordInput");
+const authError = document.getElementById("authError");
+
+const signupBtn = document.getElementById("signupBtn");
+const loginBtn = document.getElementById("loginBtn");
+const logoutBtn = document.getElementById("logoutBtn");
+const addEnvelopeBtn = document.getElementById("addEnvelopeBtn");
+
+const modal = document.getElementById("modal");
+const modalBalance = document.getElementById("modalBalance");
+const amountInput = document.getElementById("amountInput");
+const noteInput = document.getElementById("noteInput");
+const historyDiv = document.getElementById("history");
+
+const addMoneyBtn = document.getElementById("addMoneyBtn");
+const spendMoneyBtn = document.getElementById("spendMoneyBtn");
+const closeModalBtn = document.getElementById("closeModalBtn");
+
+// SIGN UP
+signupBtn.onclick = async () => {
+if(!emailInput.value || !passwordInput.value){
+authError.innerText = "Enter email & password";
+return;
+}
+
+try {
+await createUserWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
+authError.innerText = "";
+} catch(e) {
+authError.innerText = e.message;
+}
+};
+
+// LOGIN
+loginBtn.onclick = async () => {
+if(!emailInput.value || !passwordInput.value){
+authError.innerText = "Enter email & password";
+return;
+}
+
+try {
+await signInWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
+authError.innerText = "";
+} catch(e) {
+authError.innerText = e.message;
+}
+};
+
+// LOGOUT
+logoutBtn.onclick = () => signOut(auth);
+
+// AUTH STATE
+onAuthStateChanged(auth, (user) => {
+if(user){
+userId = user.uid;
+authDiv.style.display = "none";
+appDiv.style.display = "block";
+renderEnvelopes();
+} else {
+authDiv.style.display = "block";
+appDiv.style.display = "none";
+}
+});
+
+// ADD ENVELOPE
+addEnvelopeBtn.onclick = async () => {
+const name = prompt("Envelope name?");
+if(!name) return;
+
+await addDoc(collection(db,"users",userId,"envelopes"), {
+name, balance:0, history:[]
+});
+};
+
+// RENDER ENVELOPES
+function renderEnvelopes(){
+const ref = collection(db,"users",userId,"envelopes");
+
+onSnapshot(ref, snapshot => {
+const container = document.getElementById("envelopes");
+container.innerHTML = "";
+envelopeSpans = {};
+let total = 0;
+
+snapshot.forEach(docSnap => {
+const env = docSnap.data();
+total += env.balance;
+
+const div = document.createElement("div");
+div.className = "envelope";
+
+const nameEl = document.createElement("b");
+nameEl.innerText = env.name;
+
+const br = document.createElement("br");
+
+const balanceSpan = document.createElement("span");
+balanceSpan.innerText = `$${env.balance.toFixed(2)}`;
+if(env.balance < 0) balanceSpan.className = "negative";
+
+div.appendChild(nameEl);
+div.appendChild(br);
+div.appendChild(balanceSpan);
+
+envelopeSpans[docSnap.id] = balanceSpan;
+
+div.addEventListener("click", () => openModal(docSnap.id));
+
+container.appendChild(div);
+});
+
+document.getElementById("total").innerText = "$" + total.toFixed(2) + " Total";
+});
+}
+
+// OPEN MODAL
+async function openModal(id){
+currentEnvelopeId = id;
+const snap = await getDoc(doc(db,"users",userId,"envelopes",id));
+const env = snap.data();
+
+modal.style.display = "flex";
+modalBalance.innerText = env.balance.toFixed(2);
+renderHistory(env.history || []);
+}
+
+// CLOSE MODAL
+closeModalBtn.onclick = () => modal.style.display = "none";
+
+// HISTORY
+function renderHistory(history){
+if(!history.length){
+historyDiv.innerHTML = "<p>No transactions</p>";
+return;
+}
+
+historyDiv.innerHTML = history.slice().reverse().map(h =>
+`<p>${h.date} - ${h.type} $${h.amount} (Bal: $${h.balance})</p>`
+).join("");
+}
+
+// CHANGE BALANCE
+async function changeBalance(isAdd){
+const amount = parseFloat(amountInput.value);
+if(!amount) return;
+
+let current = parseFloat(modalBalance.innerText);
+let newBal = isAdd ? current + amount : current - amount;
+modalBalance.innerText = newBal.toFixed(2);
+
+if(envelopeSpans[currentEnvelopeId]){
+envelopeSpans[currentEnvelopeId].innerText = `$${newBal.toFixed(2)}`;
+}
+
+const entry = {
+type: isAdd?"+":"-",
+amount,
+date:new Date().toLocaleDateString(),
+balance:newBal
+};
+
+historyDiv.innerHTML = `<p>${entry.date} ${entry.type}$${entry.amount}</p>` + historyDiv.innerHTML;
+
+const ref = doc(db,"users",userId,"envelopes",currentEnvelopeId);
+const snap = await getDoc(ref);
+const data = snap.data();
+
+data.balance = newBal;
+data.history.push(entry);
+
+await setDoc(ref,data);
+}
+
+addMoneyBtn.onclick = () => changeBalance(true);
+spendMoneyBtn.onclick = () => changeBalance(false);
+
+});
+</script>
+
+</body>
+</html>
