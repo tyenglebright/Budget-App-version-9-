@@ -7,7 +7,17 @@
 
 <style>
 body { font-family: Arial; margin:0; background:#f7f7f7; }
-header { text-align:center; padding:1rem; background:#4CAF50; color:white; }
+
+/* ✨ NEW AESTHETIC HEADER */
+header {
+text-align:center;
+padding:1rem;
+background:#e6d5c3;
+color:#5c4a3f;
+font-weight:bold;
+letter-spacing:1px;
+}
+
 .container { padding:15px; }
 input, button { width:100%; padding:12px; margin:6px 0; font-size:1rem; }
 .envelope { background:white; padding:15px; border-radius:10px; margin:8px 0; cursor:pointer; box-shadow:0 3px 6px rgba(0,0,0,0.1);}
@@ -51,9 +61,14 @@ z-index:1000;
 <div id="modal">
 <div id="modalContent">
 <h4>Balance: $<span id="modalBalance">0</span></h4>
+
 <input id="amountInput" placeholder="Amount" type="number">
+<!-- ✅ NEW NOTE FIELD -->
+<input id="noteInput" placeholder="Optional note (e.g. groceries, gas)">
+
 <button id="addMoneyBtn">Add Money</button>
 <button id="spendMoneyBtn">Spend Money</button>
+
 <div id="history"></div>
 <button id="closeModalBtn">Close</button>
 </div>
@@ -99,6 +114,7 @@ const addEnvelopeBtn = document.getElementById("addEnvelopeBtn");
 const modal = document.getElementById("modal");
 const modalBalance = document.getElementById("modalBalance");
 const amountInput = document.getElementById("amountInput");
+const noteInput = document.getElementById("noteInput");
 const historyDiv = document.getElementById("history");
 
 const addMoneyBtn = document.getElementById("addMoneyBtn");
@@ -177,7 +193,6 @@ $${env.balance.toFixed(2)}
 `;
 
 envelopeSpans[docSnap.id] = div.querySelector("span");
-
 div.onclick = () => openModal(docSnap.id);
 
 container.appendChild(div);
@@ -187,7 +202,7 @@ document.getElementById("total").innerText = "$" + total.toFixed(2) + " Total";
 });
 }
 
-// OPEN MODAL (INSTANT)
+// OPEN MODAL
 function openModal(id){
 currentEnvelopeId = id;
 const env = envelopeData[id];
@@ -200,7 +215,7 @@ renderHistory(env.history || []);
 // CLOSE
 closeModalBtn.onclick = () => modal.style.display = "none";
 
-// HISTORY
+// HISTORY (NOW SHOWS NOTES)
 function renderHistory(history){
 if(!history.length){
 historyDiv.innerHTML = "<p>No transactions</p>";
@@ -208,27 +223,31 @@ return;
 }
 
 historyDiv.innerHTML = history.slice().reverse().map(h =>
-`<p>${h.date} ${h.type}$${h.amount}</p>`
+`<p>
+${h.date} ${h.type}$${h.amount}
+${h.note ? `<br><small>${h.note}</small>` : ""}
+</p>`
 ).join("");
 }
 
-// CHANGE BALANCE (NO FETCH 🔥)
+// CHANGE BALANCE (WITH NOTES)
 async function changeBalance(isAdd){
 const amount = parseFloat(amountInput.value);
+const note = noteInput.value;
+
 if(!amount) return;
 
 let env = envelopeData[currentEnvelopeId];
-
 let newBal = isAdd ? env.balance + amount : env.balance - amount;
 
 const entry = {
 type: isAdd?"+":"-",
 amount,
+note,
 date:new Date().toLocaleDateString(),
 balance:newBal
 };
 
-// update local instantly
 env.balance = newBal;
 env.history.push(entry);
 
@@ -240,7 +259,10 @@ envelopeSpans[currentEnvelopeId].innerText = `$${newBal.toFixed(2)}`;
 
 renderHistory(env.history);
 
-// save to firebase
+// clear inputs
+amountInput.value = "";
+noteInput.value = "";
+
 await setDoc(
 doc(db,"users",userId,"envelopes",currentEnvelopeId),
 env
