@@ -32,7 +32,6 @@ z-index:1000;
 <body>
 <header>Envelope Budget App</header>
 
-<!-- LOGIN -->
 <div class="container" id="auth">
 <h3>Login / Sign Up</h3>
 <input id="emailInput" placeholder="Email">
@@ -42,7 +41,6 @@ z-index:1000;
 <p id="authError" style="color:red;"></p>
 </div>
 
-<!-- APP -->
 <div class="container" id="app">
 <button id="logoutBtn">Logout</button>
 <h3 id="total">$0.00 Total</h3>
@@ -50,12 +48,10 @@ z-index:1000;
 <button id="addEnvelopeBtn">+ Add Envelope</button>
 </div>
 
-<!-- MODAL -->
 <div id="modal">
 <div id="modalContent">
 <h4>Balance: $<span id="modalBalance">0</span></h4>
 <input id="amountInput" placeholder="Amount" type="number">
-<input id="noteInput" placeholder="Optional Note">
 <button id="addMoneyBtn">Add Money</button>
 <button id="spendMoneyBtn">Spend Money</button>
 <div id="history"></div>
@@ -66,9 +62,8 @@ z-index:1000;
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// ✅ YOUR REAL CONFIG (already fixed)
 const firebaseConfig = {
 apiKey: "AIzaSyCkQ6YSSkvgPVEzHQz-UPeyJRiFqDX18Ug",
 authDomain: "budget-app-51260.firebaseapp.com",
@@ -85,6 +80,7 @@ const db = getFirestore(app);
 let userId = null;
 let currentEnvelopeId = null;
 let envelopeSpans = {};
+let envelopeData = {};
 
 document.addEventListener("DOMContentLoaded", () => {
 
@@ -103,20 +99,14 @@ const addEnvelopeBtn = document.getElementById("addEnvelopeBtn");
 const modal = document.getElementById("modal");
 const modalBalance = document.getElementById("modalBalance");
 const amountInput = document.getElementById("amountInput");
-const noteInput = document.getElementById("noteInput");
 const historyDiv = document.getElementById("history");
 
 const addMoneyBtn = document.getElementById("addMoneyBtn");
 const spendMoneyBtn = document.getElementById("spendMoneyBtn");
 const closeModalBtn = document.getElementById("closeModalBtn");
 
-// SIGN UP
+// AUTH
 signupBtn.onclick = async () => {
-if(!emailInput.value || !passwordInput.value){
-authError.innerText = "Enter email & password";
-return;
-}
-
 try {
 await createUserWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
 authError.innerText = "";
@@ -125,13 +115,7 @@ authError.innerText = e.message;
 }
 };
 
-// LOGIN
 loginBtn.onclick = async () => {
-if(!emailInput.value || !passwordInput.value){
-authError.innerText = "Enter email & password";
-return;
-}
-
 try {
 await signInWithEmailAndPassword(auth, emailInput.value, passwordInput.value);
 authError.innerText = "";
@@ -140,7 +124,6 @@ authError.innerText = e.message;
 }
 };
 
-// LOGOUT
 logoutBtn.onclick = () => signOut(auth);
 
 // AUTH STATE
@@ -166,7 +149,7 @@ name, balance:0, history:[]
 });
 };
 
-// RENDER ENVELOPES
+// RENDER
 function renderEnvelopes(){
 const ref = collection(db,"users",userId,"envelopes");
 
@@ -174,31 +157,28 @@ onSnapshot(ref, snapshot => {
 const container = document.getElementById("envelopes");
 container.innerHTML = "";
 envelopeSpans = {};
+envelopeData = {};
 let total = 0;
 
 snapshot.forEach(docSnap => {
 const env = docSnap.data();
+envelopeData[docSnap.id] = env;
+
 total += env.balance;
 
 const div = document.createElement("div");
 div.className = "envelope";
 
-const nameEl = document.createElement("b");
-nameEl.innerText = env.name;
+div.innerHTML = `
+<b>${env.name}</b><br>
+<span class="${env.balance < 0 ? 'negative' : ''}">
+$${env.balance.toFixed(2)}
+</span>
+`;
 
-const br = document.createElement("br");
+envelopeSpans[docSnap.id] = div.querySelector("span");
 
-const balanceSpan = document.createElement("span");
-balanceSpan.innerText = `$${env.balance.toFixed(2)}`;
-if(env.balance < 0) balanceSpan.className = "negative";
-
-div.appendChild(nameEl);
-div.appendChild(br);
-div.appendChild(balanceSpan);
-
-envelopeSpans[docSnap.id] = balanceSpan;
-
-div.addEventListener("click", () => openModal(docSnap.id));
+div.onclick = () => openModal(docSnap.id);
 
 container.appendChild(div);
 });
@@ -207,18 +187,17 @@ document.getElementById("total").innerText = "$" + total.toFixed(2) + " Total";
 });
 }
 
-// OPEN MODAL
-async function openModal(id){
+// OPEN MODAL (INSTANT)
+function openModal(id){
 currentEnvelopeId = id;
-const snap = await getDoc(doc(db,"users",userId,"envelopes",id));
-const env = snap.data();
+const env = envelopeData[id];
 
 modal.style.display = "flex";
 modalBalance.innerText = env.balance.toFixed(2);
 renderHistory(env.history || []);
 }
 
-// CLOSE MODAL
+// CLOSE
 closeModalBtn.onclick = () => modal.style.display = "none";
 
 // HISTORY
@@ -229,22 +208,18 @@ return;
 }
 
 historyDiv.innerHTML = history.slice().reverse().map(h =>
-`<p>${h.date} - ${h.type} $${h.amount} (Bal: $${h.balance})</p>`
+`<p>${h.date} ${h.type}$${h.amount}</p>`
 ).join("");
 }
 
-// CHANGE BALANCE
+// CHANGE BALANCE (NO FETCH 🔥)
 async function changeBalance(isAdd){
 const amount = parseFloat(amountInput.value);
 if(!amount) return;
 
-let current = parseFloat(modalBalance.innerText);
-let newBal = isAdd ? current + amount : current - amount;
-modalBalance.innerText = newBal.toFixed(2);
+let env = envelopeData[currentEnvelopeId];
 
-if(envelopeSpans[currentEnvelopeId]){
-envelopeSpans[currentEnvelopeId].innerText = `$${newBal.toFixed(2)}`;
-}
+let newBal = isAdd ? env.balance + amount : env.balance - amount;
 
 const entry = {
 type: isAdd?"+":"-",
@@ -253,16 +228,23 @@ date:new Date().toLocaleDateString(),
 balance:newBal
 };
 
-historyDiv.innerHTML = `<p>${entry.date} ${entry.type}$${entry.amount}</p>` + historyDiv.innerHTML;
+// update local instantly
+env.balance = newBal;
+env.history.push(entry);
 
-const ref = doc(db,"users",userId,"envelopes",currentEnvelopeId);
-const snap = await getDoc(ref);
-const data = snap.data();
+modalBalance.innerText = newBal.toFixed(2);
 
-data.balance = newBal;
-data.history.push(entry);
+if(envelopeSpans[currentEnvelopeId]){
+envelopeSpans[currentEnvelopeId].innerText = `$${newBal.toFixed(2)}`;
+}
 
-await setDoc(ref,data);
+renderHistory(env.history);
+
+// save to firebase
+await setDoc(
+doc(db,"users",userId,"envelopes",currentEnvelopeId),
+env
+);
 }
 
 addMoneyBtn.onclick = () => changeBalance(true);
